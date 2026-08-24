@@ -4192,7 +4192,18 @@ def stream_tts_to_speaker(
                     def mark_audio_output_active(_active):
                         return None
 
-                mark_audio_output_active(True)
+                # Ref-count only while audio is audibly rendering. Marking the
+                # whole worker lifetime keeps is_audio_output_active() true
+                # from the first LLM token to end-of-turn, so meters and
+                # visualizers read "speaking" through generation silence.
+                _audio_marked = False
+
+                def _set_audio_active(active: bool) -> None:
+                    nonlocal _audio_marked
+                    if active != _audio_marked:
+                        _audio_marked = active
+                        mark_audio_output_active(active)
+
                 try:
                     _max_reinit = 3
                     _reinit_count = 0
@@ -4210,9 +4221,12 @@ def stream_tts_to_speaker(
                                 if chunk is None:
                                     break
                                 _chunks.append(chunk)
+                            _set_audio_active(True)
                             _play_via_tempfile(
                                 iter(_chunks), stop_event, streamer.sample_rate
                             )
+                            if _audio_queue.empty():
+                                _set_audio_active(False)
                             continue
                         _pcm_leftover = b""
                         while True:
@@ -4221,6 +4235,7 @@ def stream_tts_to_speaker(
                                 break
                             if stop_event.is_set():
                                 break
+                            _set_audio_active(True)
                             _buf = _pcm_leftover + chunk
                             _aligned_len = len(_buf) - (len(_buf) % 2)
                             if _aligned_len >= 2:
@@ -4268,8 +4283,13 @@ def stream_tts_to_speaker(
                             _pcm_leftover = (
                                 _buf[_aligned_len:] if _aligned_len < len(_buf) else b""
                             )
+                        # Sentence finished with nothing queued behind it: the
+                        # speakers are about to go quiet, so say so now instead
+                        # of holding "speaking" through the synthesis gap.
+                        if _audio_queue.empty():
+                            _set_audio_active(False)
                 finally:
-                    mark_audio_output_active(False)
+                    _set_audio_active(False)
             else:
                 while True:
                     chunk_queue = _audio_queue.get()

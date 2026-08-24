@@ -258,6 +258,15 @@ VALID_HOOKS: Set[str] = {
     # read-only — attempts to change it are logged and dropped. The static
     # ``stt.prompt`` config value is the base; hook results mutate on top.
     "pre_transcription",
+    # Voice/audio lifecycle observers. Recording hooks bracket successful CLI
+    # microphone capture. Audio hooks bracket the process-wide real-output
+    # refcount (first playback starts / last playback ends). Return values are
+    # ignored; these are observability seams for local visualizers, meters, and
+    # accessibility integrations.
+    "on_voice_recording_start",
+    "on_voice_recording_end",
+    "on_audio_output_start",
+    "on_audio_output_end",
     # Kanban task lifecycle hooks. Fired by hermes_cli.kanban_db when a task
     # transitions state, AFTER the change is committed to the board DB (so the
     # hook always sees durable state and a slow plugin can never hold the
