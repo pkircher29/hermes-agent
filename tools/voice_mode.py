@@ -425,8 +425,21 @@ def mark_audio_output_active(active: bool) -> None:
     ``is_audio_output_active()`` means speech is leaving the speakers RIGHT NOW —
     unlike per-turn TTS-done events, which stay 'busy' while waiting for text."""
     global _audio_output_active_count
+    hook_name = None
     with _audio_output_lock:
+        before = _audio_output_active_count
         _audio_output_active_count = max(0, _audio_output_active_count + (1 if active else -1))
+        active_count = _audio_output_active_count
+        if before == 0 and active_count == 1:
+            hook_name = "on_audio_output_start"
+        elif before == 1 and active_count == 0:
+            hook_name = "on_audio_output_end"
+    if hook_name:  # plugin observers (e.g. local visualizers) see first-start / last-end transitions
+        try:
+            from hermes_cli.lifecycle import invoke_hook
+            invoke_hook(hook_name, active_count=active_count, surface="audio")
+        except Exception:
+            logger.debug("%s plugin hook dispatch failed", hook_name, exc_info=True)
 
 
 def is_audio_output_active() -> bool:
