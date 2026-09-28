@@ -304,20 +304,38 @@ class _StreamerPlayback:
 
     def _playback_worker(self) -> None:
         """Single consumer: play audio segments from the queue in order."""
-        if not self._use_device:
-            self._for_each_sentence(self._play_sentence_via_tempfile)
-            return
-        import numpy as _np
         try:
             from tools.voice_mode import mark_audio_output_active
         except Exception:
             mark_audio_output_active = lambda _active: None  # noqa: E731
-        self._np, self._reinit_count, self._current_stream, self._current_rate = _np, 0, None, None
-        mark_audio_output_active(True)
+        # Ref-count only while a sentence is audibly rendering. Marking the whole worker lifetime
+        # keeps is_audio_output_active() true from the first LLM token to end-of-turn, so meters
+        # and visualizers read "speaking" through generation silence.
+        marked = False
+
+        def _set_active(active: bool) -> None:
+            nonlocal marked
+            if active != marked:
+                marked = active
+                mark_audio_output_active(active)
+
+        def _bracketed(play: Callable[[queue.Queue], None]) -> Callable[[queue.Queue], None]:
+            def _run(chunk_queue) -> None:
+                _set_active(True)
+                play(chunk_queue)
+                if self._audio_queue.empty():  # nothing queued behind it: speakers go quiet now
+                    _set_active(False)
+            return _run
+
         try:
-            self._for_each_sentence(self._play_sentence_via_stream)
+            if not self._use_device:
+                self._for_each_sentence(_bracketed(self._play_sentence_via_tempfile))
+                return
+            import numpy as _np
+            self._np, self._reinit_count, self._current_stream, self._current_rate = _np, 0, None, None
+            self._for_each_sentence(_bracketed(self._play_sentence_via_stream))
         finally:
-            mark_audio_output_active(False)
+            _set_active(False)
 
     def finish(self) -> None:
         """Send the end sentinel, then wait for playback and prefetch threads."""

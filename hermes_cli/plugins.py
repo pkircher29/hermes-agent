@@ -155,6 +155,10 @@ VALID_HOOKS: Set[str] = {
     # provider, model, language, prompt, source. Return None or a dict mutating prompt/language/
     # model (registration order, last-writer-wins; file_path is read-only).
     "pre_transcription",
+    # Voice/audio lifecycle observers; returns ignored. Recording hooks bracket CLI mic capture;
+    # audio hooks bracket the process-wide real-output refcount (first playback starts / last ends).
+    "on_voice_recording_start", "on_voice_recording_end",
+    "on_audio_output_start", "on_audio_output_end",
     # Kanban task observers (hermes_cli.kanban_db), fired AFTER the DB commit so a slow plugin never
     # holds the SQLite write lock; returns ignored. claimed fires in the DISPATCHER right before
     # spawn; completed/blocked fire in the WORKER (or whichever process drove it). Kwargs: task_id,
